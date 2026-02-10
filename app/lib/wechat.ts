@@ -7,7 +7,6 @@ const WECHAT_API_BASE = "https://api.weixin.qq.com/cgi-bin";
 interface WeChatConfig {
   appId: string;
   appSecret: string;
-  thumbMediaId?: string; // 封面图 Media ID (必需)
 }
 
 interface DraftArticle {
@@ -60,12 +59,10 @@ export class WeChatService {
   async createDraft(
     article: Omit<DraftArticle, "thumb_media_id"> & { thumb_media_id?: string },
   ): Promise<string> {
-    const useThumbMediaId = article.thumb_media_id || this.config.thumbMediaId;
+    const useThumbMediaId = article.thumb_media_id;
 
     if (!useThumbMediaId) {
-      throw new Error(
-        "WeChat Thumb Media ID is not configured (WECHAT_THUMB_MEDIA_ID) and not provided.",
-      );
+      throw new Error("WeChat Thumb Media ID is required but not provided.");
     }
 
     const token = await this.getAccessToken();
@@ -201,8 +198,6 @@ export class WeChatService {
 export const getWeChatService = () => {
   const appId = process.env.WECHAT_APP_ID;
   const appSecret = process.env.WECHAT_APP_SECRET;
-  const thumbMediaId = process.env.WECHAT_THUMB_MEDIA_ID;
-
   if (!appId || !appSecret) {
     console.warn(
       "⚠️ [WeChat] Missing APP_ID or APP_SECRET in environment variables.",
@@ -210,5 +205,5 @@ export const getWeChatService = () => {
     return null;
   }
 
-  return new WeChatService({ appId, appSecret, thumbMediaId });
+  return new WeChatService({ appId, appSecret });
 };
