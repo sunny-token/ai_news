@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import Image from "next/image";
-import TestCoverButton from "./components/TestCoverButton";
+// import TestCoverButton from "./components/TestCoverButton";
 import "./globals.css";
 
 // 定义API返回类型
