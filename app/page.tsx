@@ -1,5 +1,7 @@
 "use client";
 import { useState } from "react";
+import Image from "next/image";
+import TestCoverButton from "./components/TestCoverButton";
 import "./globals.css";
 
 // 定义API返回类型
@@ -9,17 +11,20 @@ interface GenerateResponse {
   article?: string;
   hotNews?: Array<{ platform: string; title: string; url: string }>;
   date?: string;
+  coverImage?: string;
 }
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
   const [article, setArticle] = useState("");
+  const [coverImage, setCoverImage] = useState("");
   const [error, setError] = useState("");
 
   // 生成文章函数
   const generateArticle = async () => {
     setLoading(true);
     setArticle("");
+    setCoverImage("");
     setError("");
 
     try {
@@ -28,6 +33,9 @@ export default function Home() {
 
       if (data.success && data.article) {
         setArticle(data.article);
+        if (data.coverImage) {
+          setCoverImage(data.coverImage);
+        }
       } else {
         setError(data.error || "生成文章失败");
       }
@@ -45,7 +53,7 @@ export default function Home() {
     try {
       await navigator.clipboard.writeText(article);
       alert("文章复制成功！");
-    } catch (err) {
+    } catch {
       alert("复制失败，请手动复制");
     }
   };
@@ -64,14 +72,37 @@ export default function Home() {
       {loading && <p className="loading">正在抓取热点并生成文章，请稍候...</p>}
       {error && <p className="error">{error}</p>}
 
-      {article && (
+      {(article || coverImage) && (
         <div className="article-container">
+          {coverImage && (
+            <div
+              className="cover-image-container"
+              style={{ marginBottom: "20px" }}
+            >
+              <h3>生成的封面图：</h3>
+              <Image
+                src={coverImage}
+                alt="Generated Cover"
+                width={900}
+                height={383} // Approx 2.35:1 aspect ratio
+                style={{
+                  maxWidth: "100%",
+                  height: "auto",
+                  borderRadius: "8px",
+                  border: "1px solid #ddd",
+                }}
+                priority
+              />
+            </div>
+          )}
           <pre className="article-content">{article}</pre>
           <button className="copy-btn" onClick={copyArticle}>
             复制文章
           </button>
         </div>
       )}
+
+      {/* <TestCoverButton /> */}
     </main>
   );
 }

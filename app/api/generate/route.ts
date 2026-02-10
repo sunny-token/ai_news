@@ -1,4 +1,5 @@
-import { GoogleGenAI } from "@google/genai"; // 新版SDK导入
+import { generateArticleContent, generateCoverImage } from "@/app/lib/gemini";
+import { getWeChatService } from "@/app/lib/wechat";
 import * as cheerio from "cheerio";
 import { NextResponse } from "next/server";
 
@@ -8,9 +9,6 @@ interface HotNewsItem {
   title: string;
   url: string;
 }
-
-// 新版SDK初始化
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 // 以下抓取热点、生成文章逻辑
 // 抓取 36Kr 热点
@@ -152,28 +150,31 @@ const generateArticle = async (newsList: HotNewsItem[]): Promise<string> => {
 
 5. 格式红线：
    - 仅使用换行、emoji、**加粗**，无任何复杂排版；
-   - 复制到公众号编辑器自动生效，放入pre标签排版整齐；
+   - **不要**输出 <pre> 标签或 Markdown 代码块（\`\`\`）；
+   - 纯文本输出，利用换行符控制排版；
    - 全文350-550字，语言专业+轻微网感，符合微信阅读习惯。
+
+6. 附加元数据（非常重要，必须在文章最末尾输出）：
+   - 请将文章标题翻译为英文，单独一行输出，格式严格为：METADATA_ENGLISH_TITLE: <英文标题>
+   - 请生成一个用于生成封面图的英文提示词，必须包含 'no text', 'futuristic', 'tech news', '8k' 等关键词，并包含对文章核心主题的画面描述。单独一行输出，格式严格为：METADATA_COVER_PROMPT: <英文提示词>
 
 新闻列表：
 ${newsList.map((item, index) => `${index + 1}. [${item.platform}] ${item.title}`).join("\n")}
 
 输出要求：
-直接输出最终成品，无任何前言、解释、备注，拿来即可复制发布。
+直接输出纯文本内容，不要包含任何 HTML 标签（如 <pre>），包含末尾的元数据行。
 `;
 
-  try {
-    console.log("🤖 [API] Calling Gemini 2.5 Flash model...");
-    const response = await genAI.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [{ parts: [{ text: prompt }] }],
-    });
-    console.log("✨ [API] Generation successful.");
-    return response.text || "生成摘要失败，无内容返回。";
-  } catch (error) {
-    console.error("Gemini generation failed:", error);
-    return "生成摘要失败，请稍后重试。";
+  return await generateArticleContent(prompt);
+};
+
+// 辅助函数：从文章内容中提取标题
+const extractTitle = (articleContent: string): string => {
+  const match = articleContent.match(/【🔥科技早报｜([^】]+)】/);
+  if (match && match[1]) {
+    return `【🔥科技早报｜${match[1]}】`;
   }
+  return "科技财经早报"; // 默认标题
 };
 
 // API主函数（保留原有）
@@ -193,11 +194,113 @@ export async function GET() {
         { status: 400 },
       );
     }
-    const article = await generateArticle(hotNews);
+    let article = await generateArticle(hotNews);
+
+    // 移除可能存在的 Markdown 代码块或 pre 标签
+    article = article
+      .replace(/^```(?:\w+)?\n|\n```$/g, "")
+      .replace(/^<pre>\s*|\s*<\/pre>$/g, "")
+      .trim();
+
+    // 提取英文标题
+    let englishTitle = "";
+    const englishTitleMatch = article.match(/METADATA_ENGLISH_TITLE:\s*(.+)$/m);
+    if (englishTitleMatch && englishTitleMatch[1]) {
+      englishTitle = englishTitleMatch[1].trim();
+      article = article.replace(englishTitleMatch[0], "").trim();
+    }
+
+    // 提取封面提示词
+    let coverPrompt = "";
+    const coverPromptMatch = article.match(/METADATA_COVER_PROMPT:\s*(.+)$/m);
+    if (coverPromptMatch && coverPromptMatch[1]) {
+      coverPrompt = coverPromptMatch[1].trim();
+      article = article.replace(coverPromptMatch[0], "").trim();
+    }
+
+    const title = extractTitle(article); // 提取标题
+
+    // 尝试发布到微信
+    let wechatDraftId = null;
+    const wechatPublishId = null; // 预留变量，暂未使用
+    // 尝试生成封面图
+    let coverImageBase64 = null;
+    try {
+      // 优先使用提取的 Prompt，否则使用英文标题，最后回退到中文标题
+      const inputForCover = coverPrompt || englishTitle || title;
+      console.log(
+        `🎨 [API] Using input for cover generation: "${inputForCover.substring(0, 50)}..."`,
+      );
+      coverImageBase64 = await generateCoverImage(inputForCover);
+    } catch (e) {
+      console.error("Cover generation main error:", e);
+    }
+
+    const wechatService = getWeChatService();
+    if (wechatService) {
+      try {
+        // 1. 上传封面图到微信 (获取 thumb_media_id)
+        let thumbMediaId: string | undefined = undefined;
+        if (coverImageBase64) {
+          console.log("📤 [API] Uploading cover image to WeChat...");
+          try {
+            // 传入 Base64 字符串
+            thumbMediaId = await wechatService.uploadThumb(coverImageBase64);
+            console.log(
+              `✅ [API] Cover image uploaded. Media ID: ${thumbMediaId}`,
+            );
+          } catch (uploadError) {
+            console.error(
+              "❌ [API] Failed to upload cover image, using default if available:",
+              uploadError,
+            );
+          }
+        }
+
+        console.log("📤 [API] Publishing to WeChat Draft...");
+        const htmlContent = wechatService.formatContentToHtml(article);
+
+        wechatDraftId = await wechatService.createDraft({
+          title: title,
+          content: htmlContent,
+          digest: article.substring(0, 50) + "...", // 简单的摘要
+          author: "AI News Bot",
+          thumb_media_id: thumbMediaId, // 传入新生成的封面ID
+        });
+        console.log(`✅ [API] WeChat Draft Created: ${wechatDraftId}`);
+
+        // 自动群发（慎用：每天有配额限制，且订阅号只能群发1次/天）
+        // 如果仅需生成的草稿供人工确认，可注释掉下方代码
+        try {
+          console.log(`📤 [API] Publishing Draft ${wechatDraftId}...`);
+          // 注意：发布接口会将内容发布出去，订阅号一天只能发一次
+          // wechatPublishId = await wechatService.publishDraft(wechatDraftId);
+          console.log(
+            `✅ [API] WeChat Published Successfully: ${wechatPublishId}`,
+          );
+        } catch (publishError) {
+          console.error("❌ [API] Failed to publish draft:", publishError);
+        }
+      } catch (wechatError) {
+        console.error("❌ [API] Failed to publish to WeChat:", wechatError);
+        // 不阻断主流程，只记录错误
+      }
+    } else {
+      console.log(
+        "ℹ️ [API] WeChat service not configured (missing env vars). Skipping publish.",
+      );
+    }
+
     return NextResponse.json({
       success: true,
       hotNews,
       article,
+      title,
+      coverImage: coverImageBase64
+        ? `data:image/jpeg;base64,${coverImageBase64}`
+        : null, //以此格式返回给前端使用
+      wechatDraftId,
+      wechatPublishId,
       date: new Date().toLocaleDateString("zh-CN"),
     });
   } catch (error) {
@@ -209,4 +312,4 @@ export async function GET() {
   }
 }
 
-export const runtime = "edge"; // 保留Edge Runtime，不影响
+export const runtime = "nodejs"; // 使用 Node.js Runtime 以支持 axios 和 form-data
