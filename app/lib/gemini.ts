@@ -24,7 +24,7 @@ export const generateCoverImage = async (
     const encodedPrompt = encodeURIComponent(prompt);
 
     // 宽高比 2.35:1 -> 1280x544
-    const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1280&height=544&nologo=true&seed=${Math.floor(Math.random() * 10000)}&model=flux`;
+    const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1280&height=544&nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
 
     console.log("🔗 [API] Pollinations URL:", url);
 
