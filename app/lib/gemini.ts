@@ -3,43 +3,48 @@ import { GoogleGenAI } from "@google/genai";
 // 初始化 Google GenAI
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-/**
- * 生成封面图的健壮方法
- * 逻辑：Flux AI -> Turbo AI -> Unsplash 摄影图 (兜底)
- */
 export const generateCoverImage = async (
   title: string,
 ): Promise<string | null> => {
-  const seed = Math.floor(Math.random() * 10000);
+  // 1. 基础随机数，确保每次请求的种子不同
+  const seed = Math.floor(Math.random() * 100000);
 
-  // 1. 处理 Prompt：去掉 AI 塑料味，增加人类审美感词汇
-  // 既然你喜欢“人写的”文案，图片也该更有质感
-  const cleanTitle = title.replace(/[^\w\s\u4e00-\u9fa5]/gi, ""); // 简单清洗
-  const refinedPrompt = `Cinematic photography of ${cleanTitle}, minimalist composition, soft natural lighting, high depth of field, premium tech aesthetic, 4k, professional photography --no text, no watermark`;
-  const encodedPrompt = encodeURIComponent(refinedPrompt);
+  // 2. 提取关键词：从标题中提取前两个词作为搜索词，增加相关性
+  const keywords = title
+    .split(/[ ,，、]/)
+    .filter((word) => word.length > 1)
+    .slice(0, 3)
+    .join(",");
+  const encodedKeywords = encodeURIComponent(
+    keywords || "technology,minimalist",
+  );
 
-  // 定义候选 URL 列表 (按质量从高到低排序)
+  // 3. 构造不同的源
   const sources = [
     {
-      name: "Flux AI (High Quality)",
-      url: `https://pollinations.ai/p/${encodedPrompt}?width=1280&height=544&seed=${seed}&model=flux&nologo=true`,
-      timeout: 25000, // Flux 生成慢，多给点时间
+      name: "Pollinations AI (Flux)",
+      // 优化 Prompt：加入摄影师常用参数，让 AI 生成的图少一点“数码感”
+      url: `https://pollinations.ai/p/${encodeURIComponent(title + ", cinematic, analog film style, high resolution, minimalist, no text")}?width=1280&height=544&seed=${seed}&model=flux&nologo=true`,
+      timeout: 20000,
     },
     {
-      name: "Turbo AI (Fast)",
-      url: `https://pollinations.ai/p/${encodedPrompt}?width=1280&height=544&seed=${seed}&model=turbo&nologo=true`,
+      name: "Unsplash (Dynamic Photo)",
+      // 使用 Unsplash 的 Source API 随机获取与标题相关的真实摄影图
+      // sig=${seed} 是关键，它强制 Unsplash 每次返回不同的图
+      url: `https://source.unsplash.com/featured/1280x544?${encodedKeywords}&sig=${seed}`,
       timeout: 10000,
     },
     {
-      name: "Unsplash (Real Photo Fallback)",
-      url: `https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=1280&h=544&q=80`, // 默认一张高级科技感大图
-      timeout: 5000,
+      name: "Lorem Flickr (Backup)",
+      // 最后的备选，使用另一个摄影图库
+      url: `https://loremflickr.com/1280/544/${encodedKeywords}?lock=${seed}`,
+      timeout: 10000,
     },
   ];
 
   for (const source of sources) {
     try {
-      console.log(`🚀 [API] Attempting: ${source.name}...`);
+      console.log(`🚀 [API] Attempting: ${source.name} with seed ${seed}...`);
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), source.timeout);
@@ -52,32 +57,25 @@ export const generateCoverImage = async (
       clearTimeout(timeoutId);
 
       if (response.ok) {
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
+        // 部分 API 会重定向到最终图片地址
+        const finalUrl = response.url;
+        const imageRes = await fetch(finalUrl);
+        const arrayBuffer = await imageRes.arrayBuffer();
 
-        // 验证返回的是否确实是图片数据（防止 530 返回的是 HTML 报错页）
-        const contentType = response.headers.get("content-type");
+        const buffer = Buffer.from(arrayBuffer);
+        const contentType = imageRes.headers.get("content-type");
+
         if (contentType && contentType.includes("image")) {
           console.log(`✅ [API] Success via ${source.name}`);
           return buffer.toString("base64");
         }
       }
-
-      console.warn(
-        `⚠️ [API] ${source.name} failed with status: ${response.status}`,
-      );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
-      if (error.name === "AbortError") {
-        console.error(`⏱️ [API] ${source.name} timed out.`);
-      } else {
-        console.error(`❌ [API] ${source.name} error:`, error.message);
-      }
+      console.warn(`⚠️ [API] ${source.name} failed, trying next...`, error);
     }
-    // 当前源失败，自动进入下一个循环
   }
 
-  console.error("💀 [API] All image sources failed.");
   return null;
 };
 
