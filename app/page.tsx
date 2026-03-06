@@ -1,6 +1,5 @@
 "use client";
 import { useState } from "react";
-import Image from "next/image";
 // import TestCoverButton from "./components/TestCoverButton";
 import "./globals.css";
 
@@ -74,7 +73,7 @@ export default function Home() {
 
       {(article || coverImage) && (
         <div className="article-container">
-          {coverImage && (
+          {/* {coverImage && (
             <div
               className="cover-image-container"
               style={{ marginBottom: "20px" }}
@@ -94,7 +93,7 @@ export default function Home() {
                 priority
               />
             </div>
-          )}
+          )} */}
           <pre className="article-content">{article}</pre>
           <button className="copy-btn" onClick={copyArticle}>
             复制文章
